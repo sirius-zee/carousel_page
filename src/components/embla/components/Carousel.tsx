@@ -1,8 +1,7 @@
-
-
-import { Children, cloneElement, isValidElement, useMemo } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactNode, ReactElement } from "react";
-import type { CarouselOptions, CarouselEffect, CarouselBehavior } from "../types";
+import type { CarouselOptions, CarouselEffect, CarouselBehavior, CarouselType, AutoScrollOptions } from "../types";
+import type { ClassNamesOptionsType } from "embla-carousel-class-names";
 import type { AutoplayOptions } from "../behaviors/autoplay";
 import { useCarousel } from "../hooks/useCarousel";
 import CarouselViewport from "./CarouselViewport";
@@ -42,6 +41,15 @@ export interface CarouselProps<T = unknown> {
   axis?: "x" | "y";
   aspectRatio?: CSSProperties["aspectRatio"];
   height?: CSSProperties["height"];
+  slideAspectRatio?: CSSProperties["aspectRatio"];
+  // — new type system —
+  type?: CarouselType;
+  direction?: "ltr" | "rtl";
+  autoScroll?: boolean | AutoScrollOptions;
+  classNames?: boolean | ClassNamesOptionsType;
+  lazy?: boolean;
+  infinite?: boolean;
+  thumbLoop?: boolean;
 }
 
 export default function Carousel<T = unknown>({
@@ -69,11 +77,31 @@ export default function Carousel<T = unknown>({
   axis = "x",
   aspectRatio,
   height,
+  slideAspectRatio,
+  type,
+  direction = "ltr",
+  autoScroll,
+  classNames,
+  lazy = false,
+  infinite = false,
 }: CarouselProps<T>) {
   const rawSlideCount = useMemo(() => {
     if (slides) return slides.length;
     return Children.count(children);
   }, [slides, children]);
+
+  // resolvedType & hasOverlay (type===STACK)
+  const resolvedType: CarouselType = useMemo(
+    () => options?.type ?? type ?? "SLIDE",
+    [options?.type, type],
+  );
+  const hasOverlay = useMemo(() => resolvedType === "STACK", [resolvedType]);
+
+  // autoScroll gated off STACK — plugins [Fade,AutoScroll,ClassNames] ordered via engine
+  const effectiveAutoScroll = useMemo(() => {
+    if (hasOverlay) return false as const;
+    return autoScroll ?? options?.autoScroll;
+  }, [hasOverlay, autoScroll, options?.autoScroll]);
 
   const resolvedOptions = useMemo<CarouselOptions>(() => {
     const combinedEffects = [
@@ -89,12 +117,10 @@ export default function Carousel<T = unknown>({
       const autoPlayConfig: AutoplayOptions =
         typeof autoPlay === "object" ? { ...autoPlay } : {};
 
-      // Otomatisasi delay untuk mixed media (Image + Video) jika slide memiliki property `type`
       if (slides && !autoPlayConfig.getSlideDelay) {
         autoPlayConfig.getSlideDelay = (idx: number) => {
           const slideItem = slides[idx] as Record<string, unknown> | undefined;
           if (slideItem && slideItem.type === "video") {
-            // Video slide: tahan timer otomatis, biarkan video menyelesaikan playback (onEnded)
             return null;
           }
           if (slideItem && typeof slideItem.duration === "number") {
@@ -110,17 +136,40 @@ export default function Carousel<T = unknown>({
       combinedBehaviors.push(createAutoplayBehavior(autoPlayConfig));
     }
 
-    return {
+    const base: CarouselOptions = {
       axis,
       ...options,
+      type: resolvedType,
+      direction: options?.direction ?? direction,
       effects: combinedEffects,
       behaviors: combinedBehaviors,
+      ...(classNames !== undefined ? { classNames } : options?.classNames !== undefined ? { classNames: options.classNames } : {}),
+      ...(lazy ? { lazy: true } : options?.lazy !== undefined ? { lazy: options.lazy } : {}),
+      ...(infinite ? { infinite: true } : options?.infinite !== undefined ? { infinite: options.infinite } : {}),
     };
-  }, [options, effects, behaviors, autoPlay, axis, slides]);
+
+    // autoScroll gated
+    if (effectiveAutoScroll !== undefined) {
+      (base as CarouselOptions & { autoScroll?: unknown }).autoScroll = effectiveAutoScroll as CarouselOptions["autoScroll"];
+    } else if (hasOverlay) {
+      (base as CarouselOptions & { autoScroll?: unknown }).autoScroll = false as unknown as CarouselOptions["autoScroll"];
+    }
+
+    // infinite overrides (keep simple)
+    if (infinite || options?.infinite) {
+      base.loop = false;
+      base.dragFree = true;
+      base.containScroll = "keepSnaps";
+      base.align = base.align ?? "start";
+    }
+
+    return base;
+  }, [options, effects, behaviors, autoPlay, axis, slides, resolvedType, direction, classNames, lazy, infinite, effectiveAutoScroll, hasOverlay]);
 
   const {
     emblaRef,
     slideStyles,
+    emblaApi,
     canScrollPrev,
     canScrollNext,
     scrollNext,
@@ -129,6 +178,15 @@ export default function Carousel<T = unknown>({
     selectedIndex,
     scrollSnaps,
   } = useCarousel({ options: resolvedOptions, slideCount: rawSlideCount });
+
+  // reInit on rawSlideCount — must be after useCarousel to avoid TDZ
+  const prevCountRef = useRef(rawSlideCount);
+  useEffect(() => {
+    if (prevCountRef.current !== rawSlideCount) {
+      prevCountRef.current = rawSlideCount;
+      requestAnimationFrame(() => emblaApi?.reInit());
+    }
+  }, [rawSlideCount, emblaApi]);
 
   const slideChildren = useMemo<ReactNode[]>(() => {
     if (slides && renderSlide) {
@@ -154,7 +212,7 @@ export default function Carousel<T = unknown>({
 
   const gapVal = useMemo(() => {
     if (typeof gap === "number") return `${gap}px`;
-    return gap;
+    return gap as string;
   }, [gap]);
 
   const hasGap = useMemo(() => {
@@ -213,14 +271,19 @@ export default function Carousel<T = unknown>({
     position: "relative",
   };
 
+  const effectiveAspect = slideAspectRatio ?? aspectRatio;
   if (height) {
     wrapperStyle.height = height;
-  } else if (aspectRatio) {
-    wrapperStyle.aspectRatio = aspectRatio;
+  } else if (effectiveAspect) {
+    wrapperStyle.aspectRatio = effectiveAspect;
   }
 
   return (
-    <div className={`carousel-wrapper relative ${className}`} style={wrapperStyle}>
+    <div
+      className={`carousel-wrapper relative ${className}`}
+      style={wrapperStyle}
+      dir={resolvedOptions.direction ?? direction}
+    >
       <CarouselViewport
         emblaRef={emblaRef}
         className={resolvedViewportClassName}

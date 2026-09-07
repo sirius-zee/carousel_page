@@ -1,5 +1,3 @@
-
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { createCarouselEngine } from "../core/engine";
@@ -48,10 +46,16 @@ export function useCarousel({ options, slideCount }: UseCarouselProps) {
   }, []);
 
   // Stabilize options serialization so we don't destroy/recreate Embla unnecessarily
+  // serialize type/direction/autoScroll (+ extras for correctness)
   const serializedOptions = useMemo(() => {
     if (!options) return "";
-    const { axis, loop, duration, perView, align, dragFree } = options;
-    return JSON.stringify({ axis, loop, duration, perView, align, dragFree });
+    const { axis, loop, duration, perView, align, dragFree, containScroll, direction, type, autoScroll, classNames, lazy, infinite } = options as CarouselOptions & {
+      classNames?: unknown;
+      lazy?: unknown;
+      infinite?: unknown;
+    };
+    // type/direction/autoScroll are critical for reInit per spec
+    return JSON.stringify({ axis, loop, duration, perView, align, dragFree, containScroll, direction, type, autoScroll, classNames, lazy, infinite });
   }, [options]);
 
   useEffect(() => {

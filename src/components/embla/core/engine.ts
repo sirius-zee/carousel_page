@@ -4,7 +4,11 @@ import type {
   EmblaCarouselType,
   EmblaOptionsType,
   EmblaEventType,
+  EmblaPluginType,
 } from "embla-carousel";
+import Fade from "embla-carousel-fade";
+import AutoScroll from "embla-carousel-auto-scroll";
+import ClassNames from "embla-carousel-class-names";
 import { createAxisManager } from "./axisManager";
 import { composeSlideStyle } from "./transformComposer";
 import type { AxisManager } from "../types/axis";
@@ -33,6 +37,9 @@ export interface CarouselEngine {
   slideCount(): number;
   getSlideStyles(): CSSProperties[];
 }
+
+const STACK_COMPATIBLE = new Set(["fade", "blur", "scale", "opacity", "custom"]);
+const BOTH = STACK_COMPATIBLE;
 
 function normalizeProgress(
   location: number,
@@ -80,6 +87,7 @@ function createEmblaOptions(options: CarouselOptions): EmblaOptionsType {
     slidesToScroll: options.slidesToScroll,
     dragFree: options.dragFree,
     containScroll: options.containScroll,
+    direction: options.direction ?? "ltr",
   };
 }
 
@@ -91,8 +99,44 @@ export function createCarouselEngine(
   const axis = options.axis ?? "x";
   const axisManager = createAxisManager(axis);
   const emblaOptions = createEmblaOptions(options);
-  const emblaApi = EmblaCarousel(root, emblaOptions);
-  const effects: CarouselEffect[] = options.effects ?? [];
+
+  // hasOverlay type===STACK
+  const type = options.type ?? "SLIDE";
+  const hasOverlay = type === "STACK";
+
+  // — plugins ordered [Fade, AutoScroll, ClassNames] —
+  const plugins: EmblaPluginType[] = [];
+
+  // selalu mount Fade plugin untuk STACK
+  if (hasOverlay) {
+    plugins.push(Fade());
+  }
+
+  // autoScroll gated off STACK
+  const effectiveAutoScroll = hasOverlay ? false : options.autoScroll;
+  if (effectiveAutoScroll) {
+    if (typeof effectiveAutoScroll === "object") {
+      plugins.push(AutoScroll(effectiveAutoScroll as Parameters<typeof AutoScroll>[0]));
+    } else {
+      plugins.push(AutoScroll());
+    }
+  }
+
+  if (options.classNames) {
+    if (typeof options.classNames === "object") {
+      plugins.push(ClassNames(options.classNames as Parameters<typeof ClassNames>[0]));
+    } else {
+      plugins.push(ClassNames());
+    }
+  }
+
+  const emblaApi = EmblaCarousel(root, emblaOptions, plugins as never);
+
+  const rawEffects: CarouselEffect[] = options.effects ?? [];
+  // styleEffects filter BOTH
+  const styleEffects: CarouselEffect[] = hasOverlay
+    ? rawEffects.filter((e) => BOTH.has(e.name))
+    : rawEffects;
   const behaviors: CarouselBehavior[] = options.behaviors ?? [];
   const listeners: Array<{
     event: EmblaEventType;
@@ -106,7 +150,7 @@ export function createCarouselEngine(
 
     return Array.from({ length: count }, (_, index) => {
       const effectContext = createSlideState(emblaApi, index, loop, axis);
-      const transforms = effects.map((effect) => effect.update(effectContext));
+      const transforms = styleEffects.map((effect) => effect.update(effectContext));
       return composeSlideStyle(axisManager, transforms);
     });
   };
@@ -180,3 +224,4 @@ export function createCarouselEngine(
   return engineApi;
 }
 
+export { STACK_COMPATIBLE, BOTH };
