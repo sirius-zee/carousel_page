@@ -24,7 +24,7 @@ export * from "./effects/coverflow";
 export * from "./effects/stack";
 export * from "./effects/tinder";
 export * from "./effects/cube";
-export * from "./effects/wheel";
+export { createWheelEffect, wheelEffect, createWheelEffectAlias } from "./effects/wheel";
 export * from "./effects/flip";
 
 export * from "./behaviors/autoplay";

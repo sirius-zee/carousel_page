@@ -13,6 +13,7 @@ export function createAutoplayBehavior(
   const defaultDelay = 4000;
   const stopOnMouseEnter = options.stopOnMouseEnter ?? true;
   const stopOnInteraction = options.stopOnInteraction ?? false;
+  void stopOnInteraction;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   let isPaused = false;
